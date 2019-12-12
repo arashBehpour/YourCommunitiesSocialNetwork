@@ -1,151 +1,118 @@
 import sys
-import pika
-import pymongo
-import json
-import signal
-import time
+import requests
+import datetime
+from getpass import getpass
 
-def parser(words):
-	action = ''
-	place = ''
-	subject = ''
-	message = ''
-	
-	splitList = words.split(':')
-    
-	if len(splitList) > 1:
-		action = splitList[0]
-		splitList = splitList[1].split('+')
-		
-		if len(splitList) > 1:
-			place = splitList[0]
-			splitList = splitList[1].split('"')
-			
-			if len(splitList) > 0:
-				subject = splitList[0]
-			
-			if len(splitList) > 1:
-				message = splitList[1]
-				
-	action.strip()
-	place.strip()
-	subject = "".join(subject.split())
-	subject.strip()
-	message.strip()
-	return action, place, subject, message; # returning a tuple
+users = {}
+status = ""
 
 if len(sys.argv) != 3 or sys.argv[1] != '-s':
-	print("Arguments inputed: ", str(sys.argv))
-	print("Format: client.py -u <username>")    # -u is optional, client.py should ask for username and password upon starting
-	sys.exit()
+    server_ip = "172.29.15.117"
+    
+else:
+    server_ip = str(sys.argv[2])
+    
 
-repository_ip = str(sys.argv[2])
+def displayMenu():
+    print("Welcome to your community's social network!\n")
+    status = input("Are you a registered user? y/n? Press q to quit: ") 
+    if status == "y":
+        oldLogin()
+    elif status == "n":
+        newLogin()
+    return status
 
-db = pymongo.MongoClient().test # initalize mongoDB database if not up
+def newLogin():
+    global server_ip
+    print("\nEnter 'q' in any of the fields to go back.")
+    newUser = input("Create login name: ")
+    if newUser == 'q':
+        print("\nReturning to main menu...\n")
+        return newUser  #Return anything to go back, has to be something
+        
+    r = requests.get("http://" + server_ip + "/newUser?username=" + newUser)
+    
+    while (r.json())['status'] == False: # check if login name exists
+        print("\nLogin name already exist!\n")
+        newUser = input("Create login name: ")
+        r = requests.get("http://" + server_ip + "/newUser?username=" + newUser)
+    
+    #User has found an available username! Now add password to create account.
+    newPass = getpass("Create password: ")
+    
+    #Encrypt password before sending
+    
+    
+    r = requests.get("http://" + server_ip + "/newUser?username=" + newUser + "&password=" + newPass)
+    print("\nUser created!\n")     
 
-# Initalize RabbitMQ Service(exchanges/queues/bindings) on repository rpi
-rabbitmq_user = "admin" #Change these based on user input
-rabbitmq_pass = "admin" 
+def oldLogin():
+    print("\nEnter 'q' as login name to go back.")
+    username = input("Enter login name: ")
+    if username == 'q':
+        return username #Return anything to go back, has to be something
+    
+    password = getpass("Enter password: ")
 
-credentials = pika.PlainCredentials(rabbitmq_user, rabbitmq_pass)
-connection = pika.BlockingConnection(pika.ConnectionParameters(repository_ip, 5672, '/', credentials)) # Orig = 'localhost'
-channel = connection.channel()
+    # check if user exists and login matches password
+    r = requests.get("http://" + server_ip + "/login?username=" + username + "&password=" + password)
+    
+    while (r.json())['status'] == False:
+        print("\nUser doesn't exist or wrong password!\n")
+        print("Enter 'q' to go back or try again.")
+        username = input("Enter login name: ")
+        if username == 'q':
+            return username #Return anything to go back, has to be something
+        password = getpass("Enter password: ")
+        r = requests.get("http://" + server_ip + "/login?username=" + username + "&password=" + password)
+    else:
+        print("\nLogin successful!\n")
+        loggedIn(username)
 
-# Declare Exchanges
-channel.exchange_declare(exchange='Blacksburg', exchange_type='direct')
-channel.exchange_declare(exchange='Christiansburg', exchange_type='direct')
-channel.exchange_declare(exchange='Roanoke', exchange_type='direct')
+# On this screen user has many actions they can do.
 
-#Declare Queues
-foodQueue = channel.queue_declare(queue='Food')
-videoGamesQueue = channel.queue_declare(queue='Video Games')
-mmaQueue = channel.queue_declare(queue='MMA')
-classroomsQueue = channel.queue_declare(queue='Classrooms')
-auditoriumQueue = channel.queue_declare(queue='Auditorium')
-noiseQueue = channel.queue_declare(queue='Noise')
-seatingQueue = channel.queue_declare(queue='Seating')
-wishesQueue = channel.queue_declare(queue='Wishes')
+def loggedIn(username):
+    print("Printing user's subscribed topics and private chats!")
+    print("p:<topic/friend>:\"<message/file>\" - Send messages/files to topic/friend queues.")
+    print("c:<topic/friend> - Consume messages from topic/friend queues.")
+    print("s:<topic> - Subscribes to a new topic.")
+    print("u:<topic> - Unsubscribes to a topic.")
+    print("a:<friend> - Adds a new friend and creates a private queue between you too.")
+    print("d:<friend> - Deletes a friend and the associated private queue.")
+    
+    action = ""
+    while action != "q":
+        r = requests.get("http://" + server_ip + "/list?username=" + username)
+        if (r.json())['status'] == True:
+            topics = (r.json())['topics']
+            friends = (r.json())['friends']
+            print(topics)
+            print(friends)
+        else:
+            print("Failed to fetch lists")
+        action = input("What would you like to do?\n")
+        splitlist = action.split(':')
+        action = splitlist[0]
+        tf = splitlist[1]
+        print(action)
+        print(tf)
+        if len(splitlist) > 2:
+            message = splitlist[2]
+            print(message)
+            r = requests.get("http://" + server_ip + "/produce?username=" + username)
+        else:
+            r = action(action)
+                    
+def action(i):
+    switcher={
+        'c': requests.get("http://" + server_ip + "/consume?username=" + username),
+        's': requests.get("http://" + server_ip + "/subscribe?username=" + username),
+        'u': requests.get("http://" + server_ip + "/unsubscribe?username=" + username),
+        'a': requests.get("http://" + server_ip + "/add?username=" + username),
+        'd': requests.get("http://" + server_ip + "/delete?username=" + username)
+    }
+    return switcher.get(i, "Invalid Action!")
+            
 
-# Binding's
-channel.queue_bind(exchange='Blacksburg', queue='Food', routing_key='Food')
-channel.queue_bind(exchange='Blacksburg', queue='Video Games', routing_key='Video Games')
-channel.queue_bind(exchange='Blacksburg', queue='MMA', routing_key='MMA')
-channel.queue_bind(exchange='Christiansburg', queue='Classrooms', routing_key='Classrooms')
-channel.queue_bind(exchange='Christiansburg', queue='Auditorium', routing_key='Auditorium')
-channel.queue_bind(exchange='Roanoke', queue='Noise', routing_key='Noise')
-channel.queue_bind(exchange='Roanoke', queue='Seating', routing_key='Seating')
-channel.queue_bind(exchange='Roanoke', queue='Wishes', routing_key='Wishes')
-
-#Declare dictionary to use to decide when to stop consuming
-queuesMap = {
-	"Food": foodQueue.method.message_count,
-	"Video Games": videoGamesQueue.method.message_count,
-	"MMA": mmaQueue.method.message_count,
-	"Classrooms": classroomsQueue.method.message_count,
-	"Auditorium": auditoriumQueue.method.message_count,
-	"Noise": noiseQueue.method.message_count,
-	"Seating": seatingQueue.method.message_count,
-	"Wishes": wishesQueue.method.message_count
-}
-
-
-try:
-	while True:
-		try:
-			data = client_sock.recv(1024)
-		except KeyboardInterrupt:
-			break
-		
-		if data: 
-			# Display produce/consume messages
-			print(time.strftime('[%H:%M:%S]'), "[Checkpoint 01] Message captured:", data)
-			
-			# Produce/Consume messages through bluetooth RFcomm, GPIO: red= produce request, green= consume request
-			# p:exchange+queue message OR c:exchange+queue
-			action, place, subject, message = parser(data.decode())  
-			
-			if place == '' or subject == '' or (not (action == 'p' or action == 'c')):
-				print("Incorrect format!")
-				print("Correct Format> p:place+subject message OR c:place+subject")
-				continue
-			
-			# MongoDB insert messages into persistent database
-			new_msg = { "Action": action, "Place": place, "MsgID": "01$%.f" % time.time(), "Subject": subject, "Message": message }
-			print(time.strftime('[%H:%M:%S]'), "[Checkpoint 02] Store command in MongoDB instance:", new_msg)
-			db.utilization.insert(new_msg)
-									
-			if action == 'p': # Produce /consume command to repository rpi through rabbitMQ --> Direct Exchange
-				channel.basic_publish(exchange=place, routing_key=subject, body=message)
-				
-				print(time.strftime('[%H:%M:%S]'), "[Checkpoint 04] Print out RabbitMQ command sent to the Repository RPi: Produce")
-				print("[x] Sent %r:%r" % (subject, message))
-				
-				queuesMap[subject] = queuesMap[subject] + 1
-				
-				print(time.strftime('[%H:%M:%S]'), "[Checkpoint 05] Nothing generated/received by RabbitMQ:" )
-				
-			elif action == 'c':
-				print(time.strftime('[%H:%M:%S]'), "[Checkpoint 04] Print out RabbitMQ command sent to the Repository RPi: Consume")
-				
-				def callback(ch, method, properties, body):
-					print("%r:%r" % (method.routing_key, body)) #Display recieved/consumed message
-					queuesMap[subject] = queuesMap[subject] - 1
-					if queuesMap[subject] <= 0:
-						channel.stop_consuming() #Stop consuming
-						
-				if queuesMap[subject] != 0:
-					channel.basic_consume(callback, queue=subject, no_ack=True)
-					print(time.strftime('[%H:%M:%S]'), "[Checkpoint 05] Bridge RPi prints statements generated by RabbitMQ:" )
-					channel.start_consuming()
-				else:
-					print(time.strftime('[%H:%M:%S]'), "[Checkpoint 05] Nothing in the RabbitMQ's queue to consume.")
-					
-			
-except IOError:
-	pass
-		
-		
-print("Closing Connections")
-
-connection.close()				
-print("Finished")
+while status != "q":            
+    status = displayMenu()
