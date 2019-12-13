@@ -2,13 +2,53 @@ import sys
 import requests
 import datetime
 from getpass import getpass
+import json
+from geolocation.main import GoogleMaps
+import subprocess
 
-users = {}
+
+
+# Mac address
+a = subprocess.check_output(["arp | awk '{print $1,$3}'"], shell = True)
+macs = []
+for i in a.split(b'\n')[:-1]:
+    macs.append((i.split()[1]).decode("utf-8"))
+
+del macs[0]
+# Use two or more mac addresses to determine latitude and longitude
+wifiaccesspoints = []
+for i in macs:
+    wifiaccesspoints.append({'macAddress': i})
+
+gmaps_API_KEY = "AIzaSyA4SQw4hka-fjyTul9YQWdyGdEtPmO3DZA"
+
+url = "https://www.googleapis.com/geolocation/v1/geolocate?key=" + gmaps_API_KEY
+payload = {"considerIp": "true", 
+            "wifiAccessPoints": wifiaccesspoints}
+headers = {'content-type': 'application/json', 'Accept-Charset': 'UTF-8'}
+r = requests.post(url, data=json.dumps(payload), headers=headers)
+
+#From the lat and lng find the actual address
+location = r.json()['location']
+base = "https://maps.googleapis.com/maps/api/geocode/json?"
+params = "latlng={lat},{lon}&key={key}&result_type=administrative_area_level_1|locality".format(
+    lat=location['lat'],
+    lon=location['lng'],
+    key=gmaps_API_KEY
+)
+url = "{base}{params}".format(base=base, params=params)
+r = requests.get(url)
+city = (r.json())['results'][0]['address_components'][0]['short_name']
+state = (r.json())['results'][1]['address_components'][0]['short_name']
+
+
 status = ""
 
+
+
 if len(sys.argv) != 3 or sys.argv[1] != '-s':
-    server_ip = "172.29.15.117"
-    
+    #server_ip = "172.29.15.117"
+    server_ip = "192.168.1.137"
 else:
     server_ip = str(sys.argv[2])
     
@@ -78,7 +118,7 @@ def loggedIn(username):
     print("s:<topic> - Subscribes to a new topic.")
     print("u:<topic> - Unsubscribes to a topic.")
     print("a:<friend> - Adds a new friend and creates a private queue between you too.")
-    print("d:<friend> - Deletes a friend and the associated private queue.")
+    print("d:<friend> - Deletes a friend and the associated private queue.\n")
     
     action = ""
     while action != "q":
