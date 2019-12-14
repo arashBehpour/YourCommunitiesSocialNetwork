@@ -9,6 +9,9 @@ https://pika.readthedocs.io/en/latest/modules/channel.html#pika.channel.Channel
 MongoDB documentation help:
 https://docs.mongodb.com/manual/reference/mongo-shell/
 
-Pika/RabbitMQ heartbeat connection.close() issue:
+Pika/RabbitMQ heartbeat discussion connection.close() issue:
 https://stackoverflow.com/questions/35193335/how-to-reconnect-to-rabbitmq
 https://github.com/pika/pika/issues/636
+
+Pika/RabbitMq best way to solve connection.close() issue:
+https://github.com/pika/pika/blob/0.12.0/examples/basic_consumer_threaded.py
