@@ -52,6 +52,15 @@ for cur in listOfTopics:
         channel.exchange_declare(exchange=splitList[0], exchange_type='direct')
         channel.queue_bind(exchange=splitList[0], queue=strFullTopic, routing_key=strFullTopic)
 
+# Create any chat queues that were previously made and stored in mongoDB
+listOfUsers = db.users_collection.find()
+for curUser in listOfUsers:
+    curUsername = curUser['User']
+    chatUsersList = curUser['Chats']
+    for friendStr in chatUsersList:
+        sendName = curUsername + '+' + friendStr
+        channel.queue_declare(queue=sendName)
+        channel.queue_bind(exchange='chat', queue=sendName, routing_key=sendName)
 
 #*****************************************************************************************************************************************
 # REST Server side Application
@@ -110,7 +119,7 @@ def createUser():
 @auth_required
 def topics_produce():
     
-    username = request.args.get('user')
+    username = request.authorization["username"]
     message = request.args.get('mssg')
     location = request.args.get('loc') # Ex. Will come in like VA-herndon
     topic = request.args.get('topic') # Ex. jiuJistu
@@ -120,7 +129,7 @@ def topics_produce():
         community_topic = location + ":" + topic # Ex. Queue name and stored in mongoDB as VA-herndon:jiuJistu
         result2 = db.topics_collection.find_one({"Topic" : community_topic}) # check if valid topic in your community. MAYBE: prevent user from making topic as location (Ex. VA-herndon as topic)
         
-        if result == None:
+        if result == None: # TODO: remove these types of statements from all http resources b/c I use request.authorization["username"]
             response = {"Error" : "Username not valid."}
         else:
             
@@ -163,7 +172,7 @@ def topics_produce():
 @auth_required
 def topics_consume():
     
-    username = request.args.get('user')
+    username = request.authorization["username"]
     location = request.args.get('loc') # Ex. Will come in like VA-herndon
     topic = request.args.get('topic') # Ex. jiuJistu
     
@@ -258,7 +267,7 @@ def topics_list():
 def topics_remove():
     
     topic = request.args.get('topic')
-    username = request.args.get('user')
+    username = request.authorization["username"]
     
     if topic != None and username != None:
         result = db.users_collection.find_one({"User" : username}) # Check if username is valid
@@ -289,7 +298,7 @@ def topics_remove():
 @auth_required
 def chat_list():
     
-    username = request.args.get('user')
+    username = request.authorization["username"]
     
     if username != None:
         result = db.users_collection.find_one({"User" : username}) # Check if username is valid
@@ -300,33 +309,87 @@ def chat_list():
             chatList = []
             for curChatFriend in result['Chats']:
                 chatList.append(curChatFriend)
-        
+                
             response = {"Chats" : chatList}
     else:
         response = {"Error" : "Need more information(user)."}
     
     templateData = {
-        'title': "chat/list",
+        'title': "chats/list",
         'response': response
     }
     
     return render_template('main.html', **templateData)
 
 
-@app.route("/chats/create", methods=['GET']) # Build 2 queues to talk to each other
+@app.route("/chats/create", methods=['GET']) # Note: Will not ask other person for permission, will create chat upon request from either person
 @auth_required
 def chat_create():
-    print("in chat create")
+    
+    username = request.authorization["username"]
+    chatUsername = request.args.get('chatUser')
+    
+    if username != None and chatUsername != None:
+        result = db.users_collection.find_one({"User" : username}) # Check if username is valid
+        result2 = db.users_collection.find_one({"User" : chatUsername}) # Check if chat username is valid
+        
+        if result != None and result2 != None and result['User'] != result2['User']:
+            sendName = username + '+' + chatUsername
+            receiveName = chatUsername + '+' + username
+            
+            global connection, channel # channel closes after a while of not being in use, need to reopen
+            try: 
+                sendingQueue = channel.queue_declare(queue=sendName)
+                receivingQueue = channel.queue_declare(queue=receiveName)
+            except:
+                connection = pika.BlockingConnection(pika.ConnectionParameters('localhost', 5672, '/', credentials)) 
+                channel = connection.channel()
+                sendingQueue = channel.queue_declare(queue=sendName)
+                receivingQueue = channel.queue_declare(queue=receiveName)
 
-@app.route("/chats/produce", methods=['GET']) # FIXME: will change to be a POST
+            # Binding's
+            channel.queue_bind(exchange='chat', queue=sendName, routing_key=sendName)
+            channel.queue_bind(exchange='chat', queue=receiveName, routing_key=receiveName)
+            
+            # Add chat user to the Users 'Chats' mongoDB info if it is not there, and other way around
+            if chatUsername not in result['Chats']:
+                newList = result['Chats'] + [chatUsername]
+                db.users_collection.update_one({"User" : username}, { "$set": { "Chats": newList} })
+                
+            if username not in result2['Chats']:
+                newList = result2['Chats'] + [username]
+                db.users_collection.update_one({"User" : chatUsername}, { "$set": { "Chats": newList} })
+            
+            response = {"Chats" : db.users_collection.find_one({"User" : username})['Chats']}
+            
+        elif result2 == None:
+            response = {"Error" : "Requested chat user does not exist."}
+        elif result == None: 
+            response = {"Error" : "Username not valid."}
+        else: 
+            response = {"Error" : "Can not chat with yourself."} #result['User'] == result2['User']
+        
+    else:
+        response = {"Error" : "Need more information(user, chatUser)."}
+    
+    templateData = {
+        'title': "chats/create",
+        'response': response
+    }
+    
+    return render_template('main.html', **templateData)
+        
+    
+
+@app.route("/chats/produce", methods=['GET']) 
 @auth_required
 def chat_produce():
-    print("in chat produce")
+    print("in chat produce") #Queue will be user+chatUser
     
 @app.route("/chats/consume", methods=['GET'])
 @auth_required
 def chat_consume():
-    print("in chat consume")
+    print("in chat consume") #Queue will be chatUser+user
     """
     curTopicQueue = channel.queue_declare(queue=community_topic)
     origMessageCount = curTopicQueue.method.message_count
@@ -357,6 +420,21 @@ def chat_consume():
 @auth_required
 def chat_remove():
     print("in chat remove")
+    username = request.authorization["username"]
+    chatUsername = request.args.get('chatUser')
+    
+    if username != None and chatUsername != None:
+        response = {"Gucci" : ":)"}
+    else:
+        response = {"Error" : "Need more information(user, chatUser)."}
+    
+    templateData = {
+        'title': "chats/remove",
+        'response': response
+    }
+    
+    return render_template('main.html', **templateData)
+    
     
 
 if __name__ == "__main__":
