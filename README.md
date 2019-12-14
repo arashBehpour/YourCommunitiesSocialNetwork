@@ -15,3 +15,6 @@ https://github.com/pika/pika/issues/636
 
 Pika/RabbitMq best way to solve connection.close() issue:
 https://github.com/pika/pika/blob/0.12.0/examples/basic_consumer_threaded.py
+
+Python requests library sending authentication:
+https://2.python-requests.org/en/master/user/authentication/
