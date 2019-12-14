@@ -301,7 +301,7 @@ def chat_list():
             for curChatFriend in result['Chats']:
                 chatList.append(curChatFriend)
         
-        response = {"Chats" : chatList}
+            response = {"Chats" : chatList}
     else:
         response = {"Error" : "Need more information(user)."}
     
