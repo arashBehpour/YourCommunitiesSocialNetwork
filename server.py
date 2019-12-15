@@ -87,19 +87,20 @@ def auth_required(f):
     return decorated
 
 
-@app.route("/create/user", methods=['GET']) #FIXME: could be a POST
+@app.route("/create/user", methods=['GET']) 
 def createUser():
     
     new_username = request.args.get('username')
     new_password = request.args.get('password')
     
     if new_username != None and new_password != None:
-        result = db.users_collection.find_one({"User" : new_username}) # check if username to be created is already in use. MAYBE: prevent user from making username with '+', ':'
+        result = db.users_collection.find_one({"User" : new_username}) # check if username to be created is already in use.
         
         if result != None:
             response = {"Error" : "Username is already in use."}
+        elif '+' in new_username or ':' in new_username:
+            response = {"Error" : "Username provided should not contain characters= '+', ':' "}
         else:
-            #chat_obj = {"friend" : None, "links" : []}
             new_user_document = { "User": new_username, "Password": new_password, "Topics": [], "Chats": [] }
             db.users_collection.insert(new_user_document)
             response = new_user_document
@@ -158,7 +159,7 @@ def topics_produce():
                 db.users_collection.update_one({"User" : username}, { "$set": { "Topics": newList} })
         
     else:
-        response = {"Error" : "Need more information(user, mssg, loc, topic)."}
+        response = {"Error" : "Need more information(mssg, loc, topic)."}
     
     templateData = {
         'title': "topics/produce",
@@ -215,7 +216,7 @@ def topics_consume():
                 response = {"Error" : "No such topic in your area to consume from. Or you are not subscribed to topic."}
     
     else:
-        response = {"Error" : "Need more information(user, loc, topic)."}
+        response = {"Error" : "Need more information(loc, topic)."}
     
     templateData = {
         'title': "topics/consume",
@@ -284,7 +285,7 @@ def topics_remove():
                 response = {"Error" : "Topic to be unsubscribed is already unsubscribed from your topics list."}
                 
     else:
-        response = {"Error" : "Need more information(user, topic)."}
+        response = {"Error" : "Need more information(topic)."}
     
     templateData = {
         'title': "topics/unsubscribe",
@@ -294,7 +295,7 @@ def topics_remove():
     return render_template('main.html', **templateData)
     
 
-@app.route("/chats/list", methods=['GET']) # list all active chats user is interacting with
+@app.route("/chats/list", methods=['GET']) 
 @auth_required
 def chat_list():
     
@@ -312,7 +313,7 @@ def chat_list():
                 
             response = {"Chats" : chatList}
     else:
-        response = {"Error" : "Need more information(user)."}
+        response = {"Error" : "Need more information(user) -> not authorized user."}
     
     templateData = {
         'title': "chats/list",
@@ -351,7 +352,7 @@ def chat_create():
             channel.queue_bind(exchange='chat', queue=sendName, routing_key=sendName)
             channel.queue_bind(exchange='chat', queue=receiveName, routing_key=receiveName)
             
-            # Add chat user to the Users 'Chats' mongoDB info if it is not there, and other way around
+            # Add chat/friend user to the Users 'Chats' mongoDB info if it is not there, and other way around
             if chatUsername not in result['Chats']:
                 newList = result['Chats'] + [chatUsername]
                 db.users_collection.update_one({"User" : username}, { "$set": { "Chats": newList} })
@@ -381,52 +382,160 @@ def chat_create():
         
     
 
-@app.route("/chats/produce", methods=['GET']) 
+@app.route("/chats/produce", methods=['GET']) #FIXME: will change to be a POST
 @auth_required
 def chat_produce():
-    print("in chat produce") #Queue will be user+chatUser
+    
+    username = request.authorization["username"]
+    chatUsername = request.args.get('chatUser')
+    message = request.args.get('mssg')
+    
+    if username != None and chatUsername != None and message != None:
+        result = db.users_collection.find_one({"User" : username}) # Check if username is valid
+        result2 = db.users_collection.find_one({"User" : chatUsername}) # Check if chat username is valid
+        sendName = username + '+' + chatUsername #Queue will be user+chatUser
+        
+        if result != None and result2 != None and result['User'] != result2['User']: 
+            
+            global connection, channel # channel closes after a while of not being in use, need to reopen
+            try: 
+                sendingQueue = channel.queue_declare(queue=sendName)
+            except:
+                connection = pika.BlockingConnection(pika.ConnectionParameters('localhost', 5672, '/', credentials)) 
+                channel = connection.channel()
+                sendingQueue = channel.queue_declare(queue=sendName)
+            
+            # Produce a message in rabbitMQ
+            full_message = username + ": " + message
+            channel.basic_publish(exchange='chat', routing_key=sendName, body=full_message)
+            response = {"SentFrom" : username,"SentTo" : chatUsername, "Message" : full_message}
+            
+            
+        elif result2 == None:
+            response = {"Error" : "Requested chat user does not exist."}
+        elif result == None: 
+            response = {"Error" : "Username not valid."}
+        else: 
+            response = {"Error" : "Can not chat with yourself."} #result['User'] == result2['User']
+        
+    else:
+        response = {"Error" : "Need more information(mssg, chatUser)."}
+    
+    templateData = {
+        'title': "chats/produce",
+        'response': response
+    }
+    
+    return render_template('main.html', **templateData)
+    
     
 @app.route("/chats/consume", methods=['GET'])
 @auth_required
 def chat_consume():
-    print("in chat consume") #Queue will be chatUser+user
-    """
-    curTopicQueue = channel.queue_declare(queue=community_topic)
-    origMessageCount = curTopicQueue.method.message_count
-    global consumed_message
-    consumed_message = ''
     
-    def callback(ch, method, properties, body):
-        #print("%r:%r" % (method.routing_key, body)) #Display recieved/consumed message
-        global consumed_message
-        consumed_message = body.decode()
-        print(method.delivery_tag)
-        ch.basic_ack(delivery_tag=method.delivery_tag)
-        #if consumed_message != '':
-        channel.stop_consuming() #Stop consuming
-    
-    if origMessageCount != 0:
-        channel.basic_qos(prefetch_count=1)
-        channel.basic_consume(callback, queue=community_topic)#no_ack=True)
-        channel.start_consuming()
-        response = {"Topic" : topic, "Message" : consumed_message}
-    else:
-        response = {"Topic" : topic, "Message" : ''}
-        
-    print("outside of consume")
-    """
-    
-@app.route("/chats/remove", methods=['GET']) # remove a chat from users profile/data base --> delete 2 queues
-@auth_required
-def chat_remove():
-    print("in chat remove")
     username = request.authorization["username"]
     chatUsername = request.args.get('chatUser')
     
     if username != None and chatUsername != None:
-        response = {"Gucci" : ":)"}
+        result = db.users_collection.find_one({"User" : username}) # Check if username is valid
+        result2 = db.users_collection.find_one({"User" : chatUsername}) # Check if chat username is valid
+        receiveName = chatUsername+ '+' + username #Queue will be chatUser+user
+        
+        if result != None and result2 != None and result['User'] != result2['User']:
+            
+            global connection, channel # channel closes after a while of not being in use, need to reopen
+            try: 
+                receivingQueue = channel.queue_declare(queue=receiveName)
+            except:
+                connection = pika.BlockingConnection(pika.ConnectionParameters('localhost', 5672, '/', credentials)) 
+                channel = connection.channel()
+                receivingQueue = channel.queue_declare(queue=receiveName)
+            
+            global messageCount, consumed_messages
+            messageCount = receivingQueue.method.message_count
+            consumed_messages = []
+            
+            def callback(ch, method, properties, body):
+                global messageCount, consumed_messages
+                consumed_messages.append(body.decode())
+                messageCount = messageCount - 1
+                ch.basic_ack(delivery_tag=method.delivery_tag)
+                if messageCount <= 0:
+                    channel.stop_consuming() #Stop consuming
+                    
+            if messageCount != 0:
+                channel.basic_qos(prefetch_count=1)
+                channel.basic_consume(callback, queue=receiveName)#no_ack=True)
+                channel.start_consuming()
+                response = {"SentFrom" : chatUsername,"SentTo" : username, "Message" : consumed_messages}
+            else:
+                response = {"SentFrom" : chatUsername,"SentTo" : username, "Message" : ''}
+            
+        elif result2 == None:
+            response = {"Error" : "Requested chat user does not exist."}
+        elif result == None: 
+            response = {"Error" : "Username not valid."}
+        else: 
+            response = {"Error" : "Can not chat with yourself."} #result['User'] == result2['User']
+        
     else:
-        response = {"Error" : "Need more information(user, chatUser)."}
+        response = {"Error" : "Need more information(chatUser)."}
+    
+    templateData = {
+        'title': "chats/consume",
+        'response': response
+    }
+    
+    return render_template('main.html', **templateData)
+    
+    
+@app.route("/chats/remove", methods=['GET']) # remove a chat from users profile/data base --> delete 2 queues
+@auth_required
+def chat_remove():
+
+    username = request.authorization["username"]
+    chatUsername = request.args.get('chatUser')
+    
+    if username != None and chatUsername != None:
+        result = db.users_collection.find_one({"User" : username}) # Check if username is valid
+        result2 = db.users_collection.find_one({"User" : chatUsername}) # Check if chat username is valid
+        
+        if result != None and result2 != None and result['User'] != result2['User']:
+            sendName = username + '+' + chatUsername
+            receiveName = chatUsername + '+' + username
+            
+            global connection, channel # channel closes after a while of not being in use, need to reopen
+            try: 
+                channel.queue_delete(queue=sendName)
+                channel.queue_delete(queue=receiveName)
+            except:
+                connection = pika.BlockingConnection(pika.ConnectionParameters('localhost', 5672, '/', credentials)) 
+                channel = connection.channel()
+                channel.queue_delete(queue=sendName)
+                channel.queue_delete(queue=receiveName)
+                
+            # Remove chat/friend user from the Users 'Chats' mongoDB info if it is there, and other way around
+            if chatUsername in result['Chats']:
+                newList = list(result['Chats']) 
+                newList.remove(chatUsername)
+                db.users_collection.update_one({"User" : username}, { "$set": { "Chats": newList} })
+                
+            if username in result2['Chats']:
+                newList = list(result2['Chats'])
+                newList.remove(username)
+                db.users_collection.update_one({"User" : chatUsername}, { "$set": { "Chats": newList} })
+            
+            response = {"Chats" : db.users_collection.find_one({"User" : username})['Chats']}
+            
+        elif result2 == None:
+            response = {"Error" : "Requested chat user does not exist."}
+        elif result == None: 
+            response = {"Error" : "Username not valid."}
+        else: 
+            response = {"Error" : "Can not remove chat with yourself."} #result['User'] == result2['User']
+        
+    else:
+        response = {"Error" : "Need more information(chatUser)."}
     
     templateData = {
         'title': "chats/remove",
