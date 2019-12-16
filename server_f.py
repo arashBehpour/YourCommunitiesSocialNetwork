@@ -8,8 +8,27 @@ from flask import Flask, request, make_response
 
 app = Flask(__name__)
 db = pymongo.MongoClient().users # initalize mongoDB database if not up
+"""
+def auth_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth = request.authorization
+        
+        if auth:
+            result = db.userData.find_one({"username" : auth.username})
+            if result != None:
+                
+                if result['password'] == auth.password:
+                    return f(*args, **kwargs)
+                
+                return make_response('Invalid password', 401, {'WWW-Authenticate': 'Basic realm="Login Required"'})
+                
+            return make_response('User:' + auth.username + ' does not exist', 401, {'WWW-Authenticate': 'Basic realm="Login Required"'})
+            
+        return make_response('Could not verify your login!', 401, {'WWW-Authenticate': 'Basic realm="Login Required"'})
 
-
+    return decorated
+"""
 @app.route('/newUser')
 def newUser():
 	print("Attempting new account creation...")
@@ -62,6 +81,7 @@ def login():
 	return json.dumps({'status': False})
 	
 @app.route('/list')
+#@auth_required
 def list():
 	print("Fetching user's personalized/private topics...")
 	try:
@@ -83,27 +103,32 @@ def list():
 	return json.dumps({'status': False})
 	
 @app.route('/produce')
+#@auth_required
 def produce():
 	return "producing"
 
 @app.route('/consume')
+#@auth_required
 def consume():
 	return "consuming"
 	
 @app.route('/subscribe')
+#@auth_required
 def subscribe():
 	return "subscribing"
 	
 @app.route('/unsubscribe')
+#@auth_required
 def unsubscribe():
-	
 	return "unsubscribing"
 	
 @app.route('/add')
+#@auth_required
 def add():
 	return "adding"
 
 @app.route('/delete')
+#@auth_required
 def delete():
 	return "deleting"
 

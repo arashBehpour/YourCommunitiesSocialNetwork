@@ -1,5 +1,7 @@
 import sys
 import requests
+import os
+from requests.auth import HTTPDigestAuth
 import datetime
 from getpass import getpass
 import json
@@ -15,7 +17,7 @@ for i in a.split(b'\n')[:-1]:
     macs.append((i.split()[1]).decode("utf-8"))
 
 del macs[0]
-# Use two or more mac addresses to determine latitude and longitude
+# Use two or more mac addresses to determine latitude and longitude or revert to ip
 wifiaccesspoints = []
 for i in macs:
     wifiaccesspoints.append({'macAddress': i})
@@ -41,14 +43,16 @@ r = requests.get(url)
 city = (r.json())['results'][0]['address_components'][0]['short_name']
 state = (r.json())['results'][1]['address_components'][0]['short_name']
 
-
+#Combine state and city to form final location
+location = state + '-' + city.lower()
 status = ""
 
 
 
 if len(sys.argv) != 3 or sys.argv[1] != '-s':
-    #server_ip = "172.29.15.117"
-    server_ip = "192.168.1.137"
+    print("Arguments inputed: ", str(sys.argv))
+    print("Format: client.py -s <server_IP>")
+    sys.exit()
 else:
     server_ip = str(sys.argv[2])
     
@@ -69,22 +73,28 @@ def newLogin():
     if newUser == 'q':
         print("\nReturning to main menu...\n")
         return newUser  #Return anything to go back, has to be something
-        
-    r = requests.get("http://" + server_ip + "/newUser?username=" + newUser)
     
-    while (r.json())['status'] == False: # check if login name exists
-        print("\nLogin name already exist!\n")
-        newUser = input("Create login name: ")
-        r = requests.get("http://" + server_ip + "/newUser?username=" + newUser)
-    
-    #User has found an available username! Now add password to create account.
     newPass = getpass("Create password: ")
+    confirmPass = getpass("Confirm password: ")
+    while (newPass != confirmPass):
+        print("Passwords do not match try again")
+        newPass = getpass("Create password: ")
+        confirmPass = getpass("Confirm password: ")
+
+    r = requests.get("http://" + server_ip + "/create/user?username=" + newUser + "&password=" + newPass)
+    print(r.json())
+    while 'Error' in r.json(): # check if login name exists
+        print(r.json()['Error'])
+        newUser = input("Create login name: ")
+        newPass = getpass("Create password: ")
+        confirmPass = getpass("Confirm password: ")
+        while (newPass != confirmPass):
+            print("Passwords do not match try again")
+            newPass = getpass("Create password: ")
+            confirmPass = getpass("Confirm password: ")
+        r = requests.get("http://" + server_ip + "/create/user?username=" + newUser + "&password=" + newPass)
     
-    #Encrypt password before sending
-    
-    
-    r = requests.get("http://" + server_ip + "/newUser?username=" + newUser + "&password=" + newPass)
-    print("\nUser created!\n")     
+    print("\nUser " + newUser + " created!\n") 
 
 def oldLogin():
     print("\nEnter 'q' as login name to go back.")
@@ -93,65 +103,122 @@ def oldLogin():
         return username #Return anything to go back, has to be something
     
     password = getpass("Enter password: ")
-
-    # check if user exists and login matches password
-    r = requests.get("http://" + server_ip + "/login?username=" + username + "&password=" + password)
     
-    while (r.json())['status'] == False:
+    # Retrieve user lists to determine if user exists
+    r = requests.get("http://" + server_ip + "/topics/list?loc=" + location + "&user=" + username, auth=(username, password))
+    
+    while 'Error' in r.json():
         print("\nUser doesn't exist or wrong password!\n")
         print("Enter 'q' to go back or try again.")
         username = input("Enter login name: ")
         if username == 'q':
             return username #Return anything to go back, has to be something
         password = getpass("Enter password: ")
-        r = requests.get("http://" + server_ip + "/login?username=" + username + "&password=" + password)
-    else:
-        print("\nLogin successful!\n")
-        loggedIn(username)
+        r = requests.get("http://" + server_ip + "/topics/list?loc=" + location + "&user=" + username, auth=(username, password))
+    print("\nLogin successful!\n")
+    auth=HTTPDigestAuth(username, password)
+    loggedIn(auth)
 
 # On this screen user has many actions they can do.
 
-def loggedIn(username):
-    print("Printing user's subscribed topics and private chats!")
-    print("p:<topic/friend>:\"<message/file>\" - Send messages/files to topic/friend queues.")
-    print("c:<topic/friend> - Consume messages from topic/friend queues.")
-    print("s:<topic> - Subscribes to a new topic.")
-    print("u:<topic> - Unsubscribes to a topic.")
-    print("a:<friend> - Adds a new friend and creates a private queue between you too.")
-    print("d:<friend> - Deletes a friend and the associated private queue.\n")
+def loggedIn(auth):
     
-    action = ""
-    while action != "q":
-        r = requests.get("http://" + server_ip + "/list?username=" + username)
-        if (r.json())['status'] == True:
-            topics = (r.json())['topics']
-            friends = (r.json())['friends']
-            print(topics)
-            print(friends)
-        else:
-            print("Failed to fetch lists")
-        action = input("What would you like to do?\n")
+    print("Printing user's subscribed topics!")
+    print("p:topic - Send messages/files to topics.") # This needs to change to a post request
+    print("c:topic - Receive messages from topics.")
+    print("l:topic - List local topics.")
+    print("u:topic - Unsubscribes to a topic.\n")
+    print("l:chat - Lists user's chats.")
+    print("a:chat - Adds a new friend and creates two private queues between you two.")
+    print("p:chat - Sends messages to a friend in your list.") # This needs to change to a post request
+    print("c:chat - Receives messages from a friend of your choice.")
+    print("r:chat - Removes a friend and the associated private queue.")
+    print("q - LOGOUT\n")
+    
+    r = requests.get("http://" + server_ip + "/topics/list?loc=" + location + "&user=" + username, auth=auth)
+    print("Subscribed Topics: " + r.json()['Topics'])
+    
+    action = input("What would you like to do?\n")
+    
+    while action != 'q':
         splitlist = action.split(':')
         action = splitlist[0]
-        tf = splitlist[1]
-        print(action)
-        print(tf)
-        if len(splitlist) > 2:
-            message = splitlist[2]
-            print(message)
-            r = requests.get("http://" + server_ip + "/produce?username=" + username)
+        if len(splitlist) == 1 and action == 'q':
+            return action
+        elif len(splitlist) == 0 or len(splitlist) > 2:
+            print("Invalid number of arguments!\n")
         else:
-            r = action(action)
+            tc = splitlist[1]
+            if tc == "topic":
+                print(topic(action, auth))
+            elif tc == "chat":
+                print(chat(action))
+            else:
+                print("You have to choose between topic/chat you benchod!")
+        
+    return action
                     
-def action(i):
-    switcher={
-        'c': requests.get("http://" + server_ip + "/consume?username=" + username),
-        's': requests.get("http://" + server_ip + "/subscribe?username=" + username),
-        'u': requests.get("http://" + server_ip + "/unsubscribe?username=" + username),
-        'a': requests.get("http://" + server_ip + "/add?username=" + username),
-        'd': requests.get("http://" + server_ip + "/delete?username=" + username)
+def topic(i, auth):
+    if i == 'p': 
+        action = input("Would you like to send a 'file' or 'message'?")
+        if action == "file":
+            file_path = input("What is the filename/file_path?")
+            return send_data_to_server(file_path)
+        elif action == "message":
+            voice = input("Would you like to send a voice message? y/n")
+            if voice == 'y':
+                anonymous = input("Would you like to make it anonymous? y/n")
+                if anonymous == 'y':
+                    message = input("What is your message?")
+                    # Add IBM TTS code or function here
+                elif anonymous == 'n':
+                    #Add recording function here
+                    return record()
+            elif voice == 'n':
+                message = input("What is your message?")
+                return requests.post("http://" + server_ip + "/topics/produce?mssg=" + message + "&loc=" + location + "&topic=" + topic, auth=auth)
+    elif i == 'c':
+        return requests.get("http://" + server_ip + "/topics/consume?loc=" + location + "&topic=" + input("Which topic would you like to consume from?"), auth=auth)
+    elif i == 'l': 
+        list_type = input("Would you like to retrieve 'local' lists or your 'user' list again?")
+        if list_type == "local":
+            return requests.get("http://" + server_ip + "/topics/list?loc=" + location, auth=auth)
+        elif list_type == "user":
+            return requests.get("http://" + server_ip + "/topics/list?loc=" + location + "&user=" + auth.user, auth=auth)
+    elif i == 'u': 
+        return requests.get("http://" + server_ip + "/topics/unsubscribe?topic=" + input("Which topic would you like to unsubscribe from?"), auth=auth)
+    else: 
+        return "Invalid action!"
+        
+def record():
+    return
+
+def send_data_to_server(file_path):
+         
+    filename = os.path.basename(file_path)
+ 
+    multipart_form_data = {
+        'file': (filename, open(file_path, 'rb')),
     }
-    return switcher.get(i, "Invalid Action!")
+ 
+    response = requests.post("http://" + server_ip + "/topics/produce?mssg=file&loc=" + location + "&topic=" + topic, files=multipart_form_data, auth=auth)
+ 
+    print(response.status_code)
+    
+    return response
+
+def download_file_from_server_endpoint(server_endpoint, local_file_path):
+ 
+    # Send HTTP GET request to server and attempt to receive a response
+    response = requests.get(server_endpoint)
+     
+    # If the HTTP GET request can be served
+    if response.status_code == 200:
+         
+        # Write the file contents in the response to a file specified by local_file_path
+        with open(local_file_path, 'wb') as local_file:
+            for chunk in response.iter_content(chunk_size=128):
+                local_file.write(chunk)
             
 
 while status != "q":            

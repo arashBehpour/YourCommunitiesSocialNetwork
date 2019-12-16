@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, make_response
+from flask import Flask, render_template, request, make_response, jsonify
 from functools import wraps
 import requests
 
@@ -15,7 +15,7 @@ topics_collection = db.topics
 
 # Initalize RabbitMQ Service(exchanges/queues/bindings) on repository rpi
 rabbitmq_user = "admin"
-rabbitmq_pass = "pass"
+rabbitmq_pass = "admin"
 
 global connection
 global channel
@@ -36,8 +36,8 @@ jiuJistuQueue = channel.queue_declare(queue='VA-herndon:jiuJistu')
 channel.queue_bind(exchange='VA-herndon', queue='VA-herndon:jiuJistu', routing_key='VA-herndon:jiuJistu')
 
 # An Initial User and Topic
-if db.users_collection.find_one({"User" : "admin"}) == None:
-    db.users_collection.insert({ "User": "admin", "Password": "admin", "Topics": [], "Chats": [] })
+if db.users_collection.find_one({"_id" : "admin"}) == None:
+    db.users_collection.insert({ "_id": "admin", "Password": "admin", "Topics": [], "Chats": [] })
     
 if db.topics_collection.find_one({"Topic" : "VA-herndon:jiuJistu"}) == None:
     db.topics_collection.insert({"Topic" : "VA-herndon:jiuJistu"})
@@ -55,7 +55,7 @@ for cur in listOfTopics:
 # Create any chat queues that were previously made and stored in mongoDB
 listOfUsers = db.users_collection.find()
 for curUser in listOfUsers:
-    curUsername = curUser['User']
+    curUsername = curUser['_id']
     chatUsersList = curUser['Chats']
     for friendStr in chatUsersList:
         sendName = curUsername + '+' + friendStr
@@ -72,7 +72,7 @@ def auth_required(f):
         auth = request.authorization
         
         if auth:
-            result = db.users_collection.find_one({"User" : auth.username})
+            result = db.users_collection.find_one({"_id" : auth.username})
             if result != None:
                 
                 if result['Password'] == auth.password:
@@ -80,7 +80,7 @@ def auth_required(f):
                 
                 return make_response('Invalid password', 401, {'WWW-Authenticate': 'Basic realm="Login Required"'})
                 
-            return make_response('User:' + auth.username + ' does not exist', 401, {'WWW-Authenticate': 'Basic realm="Login Required"'})
+            return make_response('_id:' + auth.username + ' does not exist', 401, {'WWW-Authenticate': 'Basic realm="Login Required"'})
             
         return make_response('Could not verify your login!', 401, {'WWW-Authenticate': 'Basic realm="Login Required"'})
 
@@ -94,26 +94,29 @@ def createUser():
     new_password = request.args.get('password')
     
     if new_username != None and new_password != None:
-        result = db.users_collection.find_one({"User" : new_username}) # check if username to be created is already in use.
+        result = db.users_collection.find_one({"_id" : new_username}) # check if username to be created is already in use.
         
         if result != None:
             response = {"Error" : "Username is already in use."}
         elif '+' in new_username or ':' in new_username:
             response = {"Error" : "Username provided should not contain characters= '+', ':' "}
         else:
-            new_user_document = { "User": new_username, "Password": new_password, "Topics": [], "Chats": [] }
+            new_user_document = { "_id": new_username, "Password": new_password, "Topics": [], "Chats": [] }
             db.users_collection.insert(new_user_document)
             response = new_user_document
         
     else:
         response = {"Error" : "Need more information(username, password)."}
-    
+        
+    '''
     templateData = {
         'title': "create/user",
         'response': response
     }
     
     return render_template('main.html', **templateData)
+    '''
+    return jsonify(response)
     
    
 @app.route("/topics/produce", methods=['GET']) #FIXME: will change to be a POST
@@ -126,7 +129,7 @@ def topics_produce():
     topic = request.args.get('topic') # Ex. jiuJistu
     
     if username != None and message != None and location != None and topic != None:
-        result = db.users_collection.find_one({"User" : username}) # Check if username is valid
+        result = db.users_collection.find_one({"_id" : username}) # Check if username is valid
         community_topic = location + ":" + topic # Ex. Queue name and stored in mongoDB as VA-herndon:jiuJistu
         result2 = db.topics_collection.find_one({"Topic" : community_topic}) # check if valid topic in your community. MAYBE: prevent user from making topic as location (Ex. VA-herndon as topic)
         
@@ -156,17 +159,20 @@ def topics_produce():
             # Add current Topic to Users info if it is not there
             if topic not in result['Topics']:
                 newList = result['Topics'] + [topic]
-                db.users_collection.update_one({"User" : username}, { "$set": { "Topics": newList} })
+                db.users_collection.update_one({"_id" : username}, { "$set": { "Topics": newList} })
         
     else:
         response = {"Error" : "Need more information(mssg, loc, topic)."}
     
+    '''
     templateData = {
         'title': "topics/produce",
         'response': response
     }
     
     return render_template('main.html', **templateData)
+    '''
+    return jsonify(response)
     
     
 @app.route("/topics/consume", methods=['GET'])
@@ -178,7 +184,7 @@ def topics_consume():
     topic = request.args.get('topic') # Ex. jiuJistu
     
     if username != None and location != None and topic != None:
-        result = db.users_collection.find_one({"User" : username}) # Check if username is valid
+        result = db.users_collection.find_one({"_id" : username}) # Check if username is valid
         community_topic = location + ":" + topic # Ex. Queue name and stored in mongoDB as VA-herndon:jiuJistu
         result2 = db.topics_collection.find_one({"Topic" : community_topic}) # check if valid topic in your community
         
@@ -211,19 +217,22 @@ def topics_consume():
                     channel.start_consuming()
                 
                 response = {"Topic" : topic, "Message" : consumed_message}
-                
+            elif result2 == None:
+                response = {"Error" : "No such topic in your area to consume from."}    
             else:
-                response = {"Error" : "No such topic in your area to consume from. Or you are not subscribed to topic."}
+                response = {"Error" : "You are not subscribed to this topic."}
     
     else:
         response = {"Error" : "Need more information(loc, topic)."}
-    
+    '''
     templateData = {
         'title': "topics/consume",
         'response': response
     }
     
     return render_template('main.html', **templateData)
+    '''
+    return jsonify(response)
     
     
 @app.route("/topics/list", methods=['GET']) # list all topics near users location 
@@ -237,7 +246,7 @@ def topics_list():
         
         if username != None:
             # output the topics you are subscribed too
-            result = db.users_collection.find_one({"User" : username}) 
+            result = db.users_collection.find_one({"_id" : username}) 
             
             if result == None:
                 response = {"Error" : "Username not valid."}
@@ -254,14 +263,15 @@ def topics_list():
         
     else:
         response = {"Error" : "Need more information([optional]user, loc)."}
-    
+    '''
     templateData = {
         'title': "topics/list",
         'response': response
     }
     
     return render_template('main.html', **templateData)
-        
+    '''
+    return jsonify(response)
     
 @app.route("/topics/unsubscribe", methods=['GET']) # remove a topic from users profile/data base
 @auth_required
@@ -271,7 +281,7 @@ def topics_remove():
     username = request.authorization["username"]
     
     if topic != None and username != None:
-        result = db.users_collection.find_one({"User" : username}) # Check if username is valid
+        result = db.users_collection.find_one({"_id" : username}) # Check if username is valid
         
         if result == None:
             response = {"Error" : "Username not valid."}
@@ -279,20 +289,22 @@ def topics_remove():
             if topic in result['Topics']: # Remove current topic from your list
                 newList = list(result['Topics'])
                 newList.remove(topic)
-                db.users_collection.update_one({"User" : username}, { "$set": { "Topics": newList} })
+                db.users_collection.update_one({"_id" : username}, { "$set": { "Topics": newList} })
                 response = {"Topic" : topic}
             else:
                 response = {"Error" : "Topic to be unsubscribed is already unsubscribed from your topics list."}
                 
     else:
         response = {"Error" : "Need more information(topic)."}
-    
+    '''
     templateData = {
         'title': "topics/unsubscribe",
         'response': response
     }
     
     return render_template('main.html', **templateData)
+    '''
+    return jsonify(response)
     
 
 @app.route("/chats/list", methods=['GET']) 
@@ -302,7 +314,7 @@ def chat_list():
     username = request.authorization["username"]
     
     if username != None:
-        result = db.users_collection.find_one({"User" : username}) # Check if username is valid
+        result = db.users_collection.find_one({"_id" : username}) # Check if username is valid
         
         if result == None:
             response = {"Error" : "Username not valid."}
@@ -315,12 +327,15 @@ def chat_list():
     else:
         response = {"Error" : "Need more information(user) -> not authorized user."}
     
+    '''
     templateData = {
         'title': "chats/list",
         'response': response
     }
     
     return render_template('main.html', **templateData)
+    '''
+    return jsonify(response)
 
 
 @app.route("/chats/create", methods=['GET']) # Note: Will not ask other person for permission, will create chat upon request from either person
@@ -331,10 +346,10 @@ def chat_create():
     chatUsername = request.args.get('chatUser')
     
     if username != None and chatUsername != None:
-        result = db.users_collection.find_one({"User" : username}) # Check if username is valid
-        result2 = db.users_collection.find_one({"User" : chatUsername}) # Check if chat username is valid
+        result = db.users_collection.find_one({"_id" : username}) # Check if username is valid
+        result2 = db.users_collection.find_one({"_id" : chatUsername}) # Check if chat username is valid
         
-        if result != None and result2 != None and result['User'] != result2['User']:
+        if result != None and result2 != None and result['_id'] != result2['_id']:
             sendName = username + '+' + chatUsername
             receiveName = chatUsername + '+' + username
             
@@ -355,30 +370,33 @@ def chat_create():
             # Add chat/friend user to the Users 'Chats' mongoDB info if it is not there, and other way around
             if chatUsername not in result['Chats']:
                 newList = result['Chats'] + [chatUsername]
-                db.users_collection.update_one({"User" : username}, { "$set": { "Chats": newList} })
+                db.users_collection.update_one({"_id" : username}, { "$set": { "Chats": newList} })
                 
             if username not in result2['Chats']:
                 newList = result2['Chats'] + [username]
-                db.users_collection.update_one({"User" : chatUsername}, { "$set": { "Chats": newList} })
+                db.users_collection.update_one({"_id" : chatUsername}, { "$set": { "Chats": newList} })
             
-            response = {"Chats" : db.users_collection.find_one({"User" : username})['Chats']}
+            response = {"Chats" : db.users_collection.find_one({"_id" : username})['Chats']}
             
         elif result2 == None:
             response = {"Error" : "Requested chat user does not exist."}
         elif result == None: 
             response = {"Error" : "Username not valid."}
         else: 
-            response = {"Error" : "Can not chat with yourself."} #result['User'] == result2['User']
+            response = {"Error" : "Can not chat with yourself."} #result['_id'] == result2['_id']
         
     else:
         response = {"Error" : "Need more information(user, chatUser)."}
     
+    '''
     templateData = {
         'title': "chats/create",
         'response': response
     }
     
     return render_template('main.html', **templateData)
+    '''
+    return jsonify(response)
         
     
 
@@ -391,11 +409,11 @@ def chat_produce():
     message = request.args.get('mssg')
     
     if username != None and chatUsername != None and message != None:
-        result = db.users_collection.find_one({"User" : username}) # Check if username is valid
-        result2 = db.users_collection.find_one({"User" : chatUsername}) # Check if chat username is valid
+        result = db.users_collection.find_one({"_id" : username}) # Check if username is valid
+        result2 = db.users_collection.find_one({"_id" : chatUsername}) # Check if chat username is valid
         sendName = username + '+' + chatUsername #Queue will be user+chatUser
         
-        if result != None and result2 != None and result['User'] != result2['User']: 
+        if result != None and result2 != None and result['_id'] != result2['_id']: 
             
             global connection, channel # channel closes after a while of not being in use, need to reopen
             try: 
@@ -416,17 +434,20 @@ def chat_produce():
         elif result == None: 
             response = {"Error" : "Username not valid."}
         else: 
-            response = {"Error" : "Can not chat with yourself."} #result['User'] == result2['User']
+            response = {"Error" : "Can not chat with yourself."} #result['_id'] == result2['_id']
         
     else:
         response = {"Error" : "Need more information(mssg, chatUser)."}
     
+    '''
     templateData = {
         'title': "chats/produce",
         'response': response
     }
     
     return render_template('main.html', **templateData)
+    '''
+    return jsonify(response)
     
     
 @app.route("/chats/consume", methods=['GET'])
@@ -437,11 +458,11 @@ def chat_consume():
     chatUsername = request.args.get('chatUser')
     
     if username != None and chatUsername != None:
-        result = db.users_collection.find_one({"User" : username}) # Check if username is valid
-        result2 = db.users_collection.find_one({"User" : chatUsername}) # Check if chat username is valid
+        result = db.users_collection.find_one({"_id" : username}) # Check if username is valid
+        result2 = db.users_collection.find_one({"_id" : chatUsername}) # Check if chat username is valid
         receiveName = chatUsername+ '+' + username #Queue will be chatUser+user
         
-        if result != None and result2 != None and result['User'] != result2['User']:
+        if result != None and result2 != None and result['_id'] != result2['_id']:
             
             global connection, channel # channel closes after a while of not being in use, need to reopen
             try: 
@@ -476,17 +497,20 @@ def chat_consume():
         elif result == None: 
             response = {"Error" : "Username not valid."}
         else: 
-            response = {"Error" : "Can not chat with yourself."} #result['User'] == result2['User']
+            response = {"Error" : "Can not chat with yourself."} #result['_id'] == result2['_id']
         
     else:
         response = {"Error" : "Need more information(chatUser)."}
     
+    '''
     templateData = {
         'title': "chats/consume",
         'response': response
     }
     
     return render_template('main.html', **templateData)
+    '''
+    return jsonify(response)
     
     
 @app.route("/chats/remove", methods=['GET']) # remove a chat from users profile/data base --> delete 2 queues
@@ -497,10 +521,10 @@ def chat_remove():
     chatUsername = request.args.get('chatUser')
     
     if username != None and chatUsername != None:
-        result = db.users_collection.find_one({"User" : username}) # Check if username is valid
-        result2 = db.users_collection.find_one({"User" : chatUsername}) # Check if chat username is valid
+        result = db.users_collection.find_one({"_id" : username}) # Check if username is valid
+        result2 = db.users_collection.find_one({"_id" : chatUsername}) # Check if chat username is valid
         
-        if result != None and result2 != None and result['User'] != result2['User']:
+        if result != None and result2 != None and result['_id'] != result2['_id']:
             sendName = username + '+' + chatUsername
             receiveName = chatUsername + '+' + username
             
@@ -518,31 +542,34 @@ def chat_remove():
             if chatUsername in result['Chats']:
                 newList = list(result['Chats']) 
                 newList.remove(chatUsername)
-                db.users_collection.update_one({"User" : username}, { "$set": { "Chats": newList} })
+                db.users_collection.update_one({"_id" : username}, { "$set": { "Chats": newList} })
                 
             if username in result2['Chats']:
                 newList = list(result2['Chats'])
                 newList.remove(username)
-                db.users_collection.update_one({"User" : chatUsername}, { "$set": { "Chats": newList} })
+                db.users_collection.update_one({"_id" : chatUsername}, { "$set": { "Chats": newList} })
             
-            response = {"Chats" : db.users_collection.find_one({"User" : username})['Chats']}
+            response = {"Chats" : db.users_collection.find_one({"_id" : username})['Chats']}
             
         elif result2 == None:
             response = {"Error" : "Requested chat user does not exist."}
         elif result == None: 
             response = {"Error" : "Username not valid."}
         else: 
-            response = {"Error" : "Can not remove chat with yourself."} #result['User'] == result2['User']
+            response = {"Error" : "Can not remove chat with yourself."} #result['_id'] == result2['_id']
         
     else:
         response = {"Error" : "Need more information(chatUser)."}
     
+    '''
     templateData = {
         'title': "chats/remove",
         'response': response
     }
     
     return render_template('main.html', **templateData)
+    '''
+    return jsonify(response)
     
     
 
