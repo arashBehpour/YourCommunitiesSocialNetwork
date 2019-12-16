@@ -106,8 +106,7 @@ def oldLogin():
     
     # Retrieve user lists to determine if user exists
     r = requests.get("http://" + server_ip + "/topics/list?loc=" + location + "&user=" + username, auth=(username, password))
-    
-    while 'Error' in r.json():
+    while r.status_code != 200:
         print("\nUser doesn't exist or wrong password!\n")
         print("Enter 'q' to go back or try again.")
         username = input("Enter login name: ")
@@ -116,14 +115,14 @@ def oldLogin():
         password = getpass("Enter password: ")
         r = requests.get("http://" + server_ip + "/topics/list?loc=" + location + "&user=" + username, auth=(username, password))
     print("\nLogin successful!\n")
-    auth=HTTPDigestAuth(username, password)
+    auth=(username, password)
     loggedIn(auth)
 
 # On this screen user has many actions they can do.
 
 def loggedIn(auth):
     
-    print("Printing user's subscribed topics!")
+    print("Available Actions:")
     print("p:topic - Send messages/files to topics.") # This needs to change to a post request
     print("c:topic - Receive messages from topics.")
     print("l:topic - List local topics.")
@@ -135,16 +134,21 @@ def loggedIn(auth):
     print("r:chat - Removes a friend and the associated private queue.")
     print("q - LOGOUT\n")
     
-    r = requests.get("http://" + server_ip + "/topics/list?loc=" + location + "&user=" + username, auth=auth)
-    print("Subscribed Topics: " + r.json()['Topics'])
+    r = requests.get("http://" + server_ip + "/topics/list?loc=" + location + "&user=" + auth[0], auth=auth)
+    print("Subscribed Topics: ")
+    for t in r.json()['Topics']:
+        print(t)
     
-    action = input("What would you like to do?\n")
+    action = ""
     
     while action != 'q':
+        action = input("What would you like to do?\n")
         splitlist = action.split(':')
         action = splitlist[0]
-        if len(splitlist) == 1 and action == 'q':
+        if action == 'q':
             return action
+        elif len(splitlist) == 1:
+            print("Invalid action!\n")
         elif len(splitlist) == 0 or len(splitlist) > 2:
             print("Invalid number of arguments!\n")
         else:
@@ -154,7 +158,7 @@ def loggedIn(auth):
             elif tc == "chat":
                 print(chat(action))
             else:
-                print("You have to choose between topic/chat you benchod!")
+                print("Cmon now, give me a valid input you benchod!")
         
     return action
                     
