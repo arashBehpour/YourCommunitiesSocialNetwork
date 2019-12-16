@@ -164,33 +164,39 @@ def loggedIn(auth):
                     
 def topic(i, auth):
     if i == 'p': 
-        action = input("Would you like to send a 'file' or 'message'?")
+        action = input("Would you like to send a 'file' or 'message'? ")
         if action == "file":
-            file_path = input("What is the filename/file_path?")
+            file_path = input("What is the filename/file_path? ")
             return send_data_to_server(file_path)
         elif action == "message":
-            voice = input("Would you like to send a voice message? y/n")
+            voice = input("Would you like to send a voice message? y/n? ")
             if voice == 'y':
-                anonymous = input("Would you like to make it anonymous? y/n")
+                anonymous = input("Would you like to make it anonymous? y/n? ")
                 if anonymous == 'y':
-                    message = input("What is your message?")
+                    message = input("What is your message? ")
                     # Add IBM TTS code or function here
                 elif anonymous == 'n':
                     #Add recording function here
                     return record()
             elif voice == 'n':
-                message = input("What is your message?")
-                return requests.post("http://" + server_ip + "/topics/produce?mssg=" + message + "&loc=" + location + "&topic=" + topic, auth=auth)
+                topic = input("What is the topic name? ")
+                message = input("What is your message? ")
+                r = requests.get("http://" + server_ip + "/topics/produce?mssg=" + message + "&loc=" + location + "&topic=" + topic, auth=auth)
+                return r.json()
     elif i == 'c':
-        return requests.get("http://" + server_ip + "/topics/consume?loc=" + location + "&topic=" + input("Which topic would you like to consume from?"), auth=auth)
+        r = requests.get("http://" + server_ip + "/topics/consume?loc=" + location + "&topic=" + input("Which topic would you like to consume from?"), auth=auth)
+        return r.json()
     elif i == 'l': 
-        list_type = input("Would you like to retrieve 'local' lists or your 'user' list again?")
+        list_type = input("Would you like to retrieve 'local' lists or your 'user' list again? ")
         if list_type == "local":
-            return requests.get("http://" + server_ip + "/topics/list?loc=" + location, auth=auth)
+            r = requests.get("http://" + server_ip + "/topics/list?loc=" + location, auth=auth)
+            return r.json()
         elif list_type == "user":
-            return requests.get("http://" + server_ip + "/topics/list?loc=" + location + "&user=" + auth.user, auth=auth)
+            r = requests.get("http://" + server_ip + "/topics/list?loc=" + location + "&user=" + auth[0], auth=auth)
+            return r.json()
     elif i == 'u': 
-        return requests.get("http://" + server_ip + "/topics/unsubscribe?topic=" + input("Which topic would you like to unsubscribe from?"), auth=auth)
+        r = requests.get("http://" + server_ip + "/topics/unsubscribe?topic=" + input("Which topic would you like to unsubscribe from? "), auth=auth)
+        return r.json()
     else: 
         return "Invalid action!"
         
