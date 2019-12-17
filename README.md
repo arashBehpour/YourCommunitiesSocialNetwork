@@ -33,3 +33,6 @@ https://2.python-requests.org//en/latest/user/quickstart/#post-a-multipart-encod
 
 UUID info:
 https://stackoverflow.com/questions/534839/how-to-create-a-guid-uuid-in-python
+
+MongoDB tutorial:
+https://api.mongodb.com/python/current/tutorial.html
