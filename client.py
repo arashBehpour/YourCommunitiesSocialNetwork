@@ -7,6 +7,8 @@ from getpass import getpass
 import json
 from geolocation.main import GoogleMaps
 import subprocess
+import pyaudio
+import wave
 
 
 
@@ -164,27 +166,32 @@ def loggedIn(auth):
                     
 def topic(i, auth):
     if i == 'p': 
-        action = input("Would you like to send a 'file' or 'message'? ")
-        if action == "file":
-            file_path = input("What is the filename/file_path? ")
-            return send_data_to_server(file_path)
-        elif action == "message":
-            voice = input("Would you like to send a voice message? y/n? ")
-            if voice == 'y':
-                anonymous = input("Would you like to make it anonymous? y/n? ")
-                if anonymous == 'y':
-                    message = input("What is your message? ")
-                    # Add IBM TTS code or function here
-                elif anonymous == 'n':
-                    #Add recording function here
-                    return record()
-            elif voice == 'n':
-                topic = input("What is the topic name? ")
+        voice = input("Would you like to send a voice message? y/n? ")
+        if voice == 'y':
+            anonymous = input("Would you like to make it anonymous? y/n? ")
+            if anonymous == 'y':
                 message = input("What is your message? ")
-                r = requests.get("http://" + server_ip + "/topics/produce?mssg=" + message + "&loc=" + location + "&topic=" + topic, auth=auth)
-                return r.json()
+                # Add IBM TTS code or function here
+                
+            elif anonymous == 'n':
+                sec = input("How many seconds would you like to record for (0<s<121)? ")
+                while int(sec) <= 0 or int(sec) > 120:
+                    sec = input("Outside of range! Try again.. (0<s<121)? ")
+                record(sec, auth)
+                return "Recorded audio file!"
+        elif voice == 'n':
+            topic = input("What is the topic name? ")
+            message = input("What is your message? ")
+            r = requests.post("http://" + server_ip + "/topics/produce?mssg=" + message + "&loc=" + location + "&topic=" + topic, auth=auth)
+            return r.json()
     elif i == 'c':
         r = requests.get("http://" + server_ip + "/topics/consume?loc=" + location + "&topic=" + input("Which topic would you like to consume from?"), auth=auth)
+        print(r)
+        print(r.status_code)
+        print(r.content)
+        print(r.text)
+        if 'isAudio' in r.json():
+            download_file_from_server_endpoint(r, "~/Desktop")
         return r.json()
     elif i == 'l': 
         list_type = input("Would you like to retrieve 'local' lists or your 'user' list again? ")
@@ -200,31 +207,69 @@ def topic(i, auth):
     else: 
         return "Invalid action!"
         
-def record():
-    return
+def record(sec, auth):
+    #The following code comes from markjay4k as referenced below
+    topic = input("What is the topic name? ")
+    form_1 = pyaudio.paInt16
+    chans=1
+    samp_rate = 48000
+    chunk = 4096
+    record_secs = int(sec)    #record time
+    dev_index = 2
+    wave_output_filename = 'audio.wav'
 
-def send_data_to_server(file_path):
-         
-    filename = os.path.basename(file_path)
- 
-    multipart_form_data = {
-        'file': (filename, open(file_path, 'rb')),
-    }
- 
-    response = requests.post("http://" + server_ip + "/topics/produce?mssg=file&loc=" + location + "&topic=" + topic, files=multipart_form_data, auth=auth)
- 
-    print(response.status_code)
+
+    audio = pyaudio.PyAudio()
+
+    #setup audio input stream
+    stream=audio.open(format = form_1,rate=samp_rate,channels=chans, input_device_index = dev_index, input=True, frames_per_buffer=chunk)
+    print("recording")
+    frames=[]
+
+    for ii in range(0,int((samp_rate/chunk)*record_secs)):
+        data=stream.read(chunk,exception_on_overflow = False)
+        frames.append(data)
+
+    print("finished recording")
+
+    stream.stop_stream()
+    stream.close()
+    audio.terminate()
+
+    #creates wave file with audio read in
+    #Code is from the wave file audio tutorial as referenced below
+    wavefile=wave.open(wave_output_filename,'wb')
+    wavefile.setnchannels(chans)
+    wavefile.setsampwidth(audio.get_sample_size(form_1))
+    wavefile.setframerate(samp_rate)
+    wavefile.writeframes(b''.join(frames))
+    wavefile.close()
     
+    #send_data_to_server(wave_output_filename, auth)
+    files = [
+        ("file", (wave_output_filename, open(wave_output_filename, "rb"), "wav"))
+    ]
+    
+    #files = { 'file': open(wave_output_filename, 'rb')}
+    
+    #files = open(wave_output_filename, "rb") 
+    #data = files.read()
+    #print(data)
+    #print(type(data))
+    response = requests.post("http://" + server_ip + "/topics/produce?mssg=file&loc=" + location + "&topic=" + topic + "&isAudio=True", files=files, auth=auth)
     return response
 
-def download_file_from_server_endpoint(server_endpoint, local_file_path):
+
+def download_file_from_server_endpoint(response, local_file_path):
  
     # Send HTTP GET request to server and attempt to receive a response
-    response = requests.get(server_endpoint)
+    #response = requests.get(server_endpoint)
      
     # If the HTTP GET request can be served
+    print(response.status_code)
     if response.status_code == 200:
-         
+        print(response.iter_content)
+        print(response.json()['Message'])
         # Write the file contents in the response to a file specified by local_file_path
         with open(local_file_path, 'wb') as local_file:
             for chunk in response.iter_content(chunk_size=128):

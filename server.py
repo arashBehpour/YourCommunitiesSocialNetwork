@@ -7,11 +7,12 @@ import pika
 import pymongo
 import time
 import json
+import uuid
 
 db = pymongo.MongoClient().network_database # initalize mongoDB database for users
 users_collection = db.users
 topics_collection = db.topics
-#audioFiles_collection = db.audioFiles --> for audio files to be sent, putting the string key into rabbitMQ instead of file
+audioFiles_collection = db.audioFiles #--> for audio files to be sent, putting the string key into rabbitMQ instead of file
 
 # Initalize RabbitMQ Service(exchanges/queues/bindings) on repository rpi
 rabbitmq_user = "admin"
@@ -98,8 +99,10 @@ def createUser():
         
         if result != None:
             response = {"Error" : "Username is already in use."}
-        elif '+' in new_username or ':' in new_username:
-            response = {"Error" : "Username provided should not contain characters= '+', ':' "}
+        elif '+' in new_username or ':' in new_username or ' ' in new_username or '+' in new_password or ':' in new_password or ' ' in new_password:
+            response = {"Error" : "Username/password provided should not contain characters= '+', ':', ' ' "}
+        elif new_username == '' or new_password == '':
+            response = {"Error" : "Username cannot be blank you fucking retard!"}
         else:
             new_user_document = { "_id": new_username, "Password": new_password, "Topics": [], "Chats": [] }
             db.users_collection.insert(new_user_document)
@@ -119,19 +122,26 @@ def createUser():
     return jsonify(response)
     
    
-@app.route("/topics/produce", methods=['GET']) #FIXME: will change to be a POST
+@app.route("/topics/produce", methods=['POST']) #FIXME: will change to be a POST
 @auth_required
 def topics_produce():
     
     username = request.authorization["username"]
-    message = request.args.get('mssg')
+    message = request.args.get('mssg') # Audio file or text message?
     location = request.args.get('loc') # Ex. Will come in like VA-herndon
     topic = request.args.get('topic') # Ex. jiuJistu
+    isAudio = request.args.get('isAudio')
     
     if username != None and message != None and location != None and topic != None:
         result = db.users_collection.find_one({"_id" : username}) # Check if username is valid
         community_topic = location + ":" + topic # Ex. Queue name and stored in mongoDB as VA-herndon:jiuJistu
         result2 = db.topics_collection.find_one({"Topic" : community_topic}) # check if valid topic in your community. MAYBE: prevent user from making topic as location (Ex. VA-herndon as topic)
+        
+        if isAudio != None: # if audio file sent
+            uuidAudio = str(uuid.uuid4())
+            db.audioFiles_collection.insert_one({"_id" : uuidAudio, "file" : request.files['file'].read()}) # uuid maps to audio file
+            message = uuidAudio
+        
         
         if result == None: # TODO: remove these types of statements from all http resources b/c I use request.authorization["username"]
             response = {"Error" : "Username not valid."}
@@ -153,8 +163,10 @@ def topics_produce():
             
             # Produce a message in rabbitMQ
             full_message = username + ": " + message
+            print(full_message)
             channel.basic_publish(exchange=location, routing_key=community_topic, body=full_message)
             response = {"Topic" : topic, "Message" : full_message}
+            print(response["Message"])
             
             # Add current Topic to Users info if it is not there
             if topic not in result['Topics']:
@@ -217,6 +229,22 @@ def topics_consume():
                     channel.start_consuming()
                 
                 response = {"Topic" : topic, "Message" : consumed_message}
+
+                # check if message is a uuid for an audio file
+                print(consumed_message)
+                maybeUuid = consumed_message.split(':', 1)[1]
+                print("|" + maybeUuid + "|")
+                maybeUuid = maybeUuid.split(' ')[1]
+                print("|" + maybeUuid + "|")
+                result3 = db.audioFiles_collection.find_one({"_id" :  maybeUuid})
+                
+                if result3 != None:
+                    curAudioFile = result3['file'] # TODO: deep copy the contents from database 
+                    consumed_message = curAudioFile
+                    ab.audioFiles_collection.delete_one({"_id" :  maybeUuid})
+                    isAudio = True
+                    response = {"Topic" : topic, "Message" : consumed_message, "isAudio" : "True"}
+                
             elif result2 == None:
                 response = {"Error" : "No such topic in your area to consume from."}    
             else:
