@@ -5,7 +5,6 @@ from requests.auth import HTTPDigestAuth
 import datetime
 from getpass import getpass
 import json
-from geolocation.main import GoogleMaps
 import subprocess
 import pyaudio
 import wave
@@ -61,6 +60,7 @@ state = (r.json())['results'][1]['address_components'][0]['short_name']
 
 #Combine state and city to form final location
 location = state + '-' + city.lower()
+print(location)
 status = ""
 
 
@@ -138,26 +138,24 @@ def oldLogin():
 
 def loggedIn(auth):
     
-    print("Available Actions:")
-    print("p:topic - Send messages/files to topics.") # This needs to change to a post request
-    print("c:topic - Receive messages from topics.")
-    print("l:topic - List local topics.")
-    print("u:topic - Unsubscribes to a topic.\n")
-    print("l:chat - Lists user's chats.")
-    print("a:chat - Adds a new friend and creates two private queues between you two.")
-    print("p:chat - Sends messages to a friend in your list.") # This needs to change to a post request
-    print("c:chat - Receives messages from a friend of your choice.")
-    print("r:chat - Removes a friend and the associated private queue.")
-    print("q - LOGOUT\n")
-    
-    r = requests.get("http://" + server_ip + "/topics/list?loc=" + location + "&user=" + auth[0], auth=auth)
-    print("Subscribed Topics: ")
-    for t in r.json()['Topics']:
-        print(t)
-    
     action = ""
     
     while action != 'q':
+        print("Available Actions:")
+        print("p:topic - Send messages/files to topics.") # This needs to change to a post request
+        print("c:topic - Receive messages from topics.")
+        print("l:topic - List local topics.")
+        print("u:topic - Unsubscribes to a topic.\n")
+        print("l:chat - Lists user's chats.")
+        print("a:chat - Adds a new friend and creates two private queues between you two.")
+        print("p:chat - Sends messages to a friend in your list.") # This needs to change to a post request
+        print("c:chat - Receives messages from a friend of your choice.")
+        print("r:chat - Removes a friend and the associated private queue.")
+        print("q - LOGOUT\n")
+        r = requests.get("http://" + server_ip + "/topics/list?loc=" + location + "&user=" + auth[0], auth=auth)
+        print("Subscribed Topics: ")
+        for t in r.json()['Topics']:
+            print(t)
         action = input("What would you like to do?\n")
         splitlist = action.split(':')
         action = splitlist[0]
@@ -174,7 +172,7 @@ def loggedIn(auth):
             elif tc == "chat":
                 print(chat(action, auth))
             else:
-                print("Cmon now, give me a valid input you benchod!")
+                print("Cmon now, give me a valid input you benchod!\n")
         
     return action
                     
@@ -198,7 +196,7 @@ def topic(i, auth):
             message = input("What is your message? ")
             topic = input("Which topic? ")
             r = requests.post("http://" + server_ip + "/topics/produce?mssg=" + message + "&loc=" + location + "&topic=" + topic + "&isAnonymous=True", auth=auth)
-            return
+            return "Sent message to " + topic + "\n"
     elif i == 'c':
         r = requests.get("http://" + server_ip + "/topics/consume?loc=" + location + "&topic=" + input("Which topic would you like to consume from?"), auth=auth)
         if 'isAudio' in r.json():
