@@ -9,8 +9,22 @@ from geolocation.main import GoogleMaps
 import subprocess
 import pyaudio
 import wave
+from ibm_watson import TextToSpeechV1, SpeechToTextV1
+from ibm_cloud_sdk_core.authenticators import IAMAuthenticator
+import pygame
 
+#IBM KEYSSS
+authenticator = IAMAuthenticator('a7GSf5ZOhnjfAvu-5bS2qVMwE2OMR3hSPOgSUzRmuZ6V')
+text_to_speech_service = TextToSpeechV1(
+    authenticator=authenticator,
+)
+text_to_speech_service.set_service_url('https://gateway-wdc.watsonplatform.net/text-to-speech/api')
 
+authenticator1 = IAMAuthenticator('NFwUeOyzBKotv0SMydyzlvCzvVeqFd3B9QzoYgeCEnzr')
+speech_to_text_service = SpeechToTextV1(
+    authenticator=authenticator1
+)
+speech_to_text_service.set_service_url('https://stream.watsonplatform.net/speech-to-text/api')
 
 # Mac address
 a = subprocess.check_output(["arp | awk '{print $1,$3}'"], shell = True)
@@ -158,7 +172,7 @@ def loggedIn(auth):
             if tc == "topic":
                 print(topic(action, auth))
             elif tc == "chat":
-                print(chat(action))
+                print(chat(action, auth))
             else:
                 print("Cmon now, give me a valid input you benchod!")
         
@@ -166,32 +180,42 @@ def loggedIn(auth):
                     
 def topic(i, auth):
     if i == 'p': 
-        voice = input("Would you like to send a voice message? y/n? ")
-        if voice == 'y':
-            anonymous = input("Would you like to make it anonymous? y/n? ")
+        voice = input("Would you like to send a text/voice message? t/v? ")
+        if voice == 't':
+            anonymous = input("Would you like to speak your text into existence? y/n? ")
             if anonymous == 'y':
-                message = input("What is your message? ")
-                # Add IBM TTS code or function here
-                
-            elif anonymous == 'n':
                 sec = input("How many seconds would you like to record for (0<s<121)? ")
                 while int(sec) <= 0 or int(sec) > 120:
                     sec = input("Outside of range! Try again.. (0<s<121)? ")
                 record(sec, auth)
-                return "Recorded audio file!"
-        elif voice == 'n':
-            topic = input("What is the topic name? ")
+                return "Converted from speech to text!"
+            elif anonymous == 'n':
+                topic = input("What is the topic name? ")
+                message = input("What is your message? ")
+                r = requests.post("http://" + server_ip + "/topics/produce?mssg=" + message + "&loc=" + location + "&topic=" + topic, auth=auth)
+                return r.json()
+        elif voice == 'v':
             message = input("What is your message? ")
-            r = requests.post("http://" + server_ip + "/topics/produce?mssg=" + message + "&loc=" + location + "&topic=" + topic, auth=auth)
-            return r.json()
+            topic = input("Which topic? ")
+            r = requests.post("http://" + server_ip + "/topics/produce?mssg=" + message + "&loc=" + location + "&topic=" + topic + "&isAnonymous=True", auth=auth)
+            return
     elif i == 'c':
         r = requests.get("http://" + server_ip + "/topics/consume?loc=" + location + "&topic=" + input("Which topic would you like to consume from?"), auth=auth)
-        print(r)
-        print(r.status_code)
-        print(r.content)
-        print(r.text)
         if 'isAudio' in r.json():
-            download_file_from_server_endpoint(r, "~/Desktop")
+            download_file_from_server_endpoint(r)
+        elif 'isAnonymous' in r.json():
+            # Add IBM TTS code or function here
+            with open("anonymous.mp3", 'wb') as audio_file:
+                response = text_to_speech_service.synthesize(r.json()['Message'],
+                                                             accept='audio/mp3',
+                                                             voice="en-US_AllisonVoice").get_result()
+                audio_file.write(response.content)
+
+            # Plays answer audio
+            #pygame.mixer.init()
+            #pygame.mixer.music.load("anonymous.mp3")
+            #pygame.mixer.music.play()
+            
         return r.json()
     elif i == 'l': 
         list_type = input("Would you like to retrieve 'local' lists or your 'user' list again? ")
@@ -203,6 +227,27 @@ def topic(i, auth):
             return r.json()
     elif i == 'u': 
         r = requests.get("http://" + server_ip + "/topics/unsubscribe?topic=" + input("Which topic would you like to unsubscribe from? "), auth=auth)
+        return r.json()
+    else: 
+        return "Invalid action!"
+
+def chat(i, auth):
+    if i == 'p': 
+        friend = input("What is the friend's name? ")
+        message = input("What is your message? ")
+        r = requests.get("http://" + server_ip + "/chats/produce?chatUser=" + friend + "&mssg=" + message, auth=auth)
+        return r.json()
+    elif i == 'c':
+        r = requests.get("http://" + server_ip + "/chats/consume?chatUser=" + input("Who's messages would you like to read? "), auth=auth)
+        return r.json()
+    elif i == 'l': 
+        r = requests.get("http://" + server_ip + "/chats/list", auth=auth)
+        return r.json()
+    elif i == 'a': 
+        r = requests.get("http://" + server_ip + "/chats/create?chatUser=" + input("Who would you like to add? "), auth=auth)
+        return r.json()
+    elif i == 'r':
+        r = requests.get("http://" + server_ip + "/chats/remove?chatUser=" + input("Who would you like to remove? "), auth=auth)
         return r.json()
     else: 
         return "Invalid action!"
@@ -245,10 +290,25 @@ def record(sec, auth):
     wavefile.writeframes(b''.join(frames))
     wavefile.close()
     
+    #IBM SPEECH TO TEXT
+    message = ''
+    jsonm= ''
+    with open(wave_output_filename, 'rb') as audio_file:
+        jsonm = speech_to_text_service.recognize(
+            audio=audio_file, 
+            content_type='audio/wav',
+            timestamps=False, 
+            word_confidence=False).get_result()
+    message=jsonm['results'][0]['alternatives'][0]['transcript']
+    print(message)
+    
+    response = requests.post("http://" + server_ip + "/topics/produce?mssg=" + message + "&loc=" + location + "&topic=" + topic, auth=auth)
+    return response
+
     #send_data_to_server(wave_output_filename, auth)
-    files = [
-        ("file", (wave_output_filename, open(wave_output_filename, "rb"), "wav"))
-    ]
+    #files = [
+    #    ("file", (wave_output_filename, open(wave_output_filename, "rb"), "wav"))
+    #]
     
     #files = { 'file': open(wave_output_filename, 'rb')}
     
@@ -256,11 +316,11 @@ def record(sec, auth):
     #data = files.read()
     #print(data)
     #print(type(data))
-    response = requests.post("http://" + server_ip + "/topics/produce?mssg=file&loc=" + location + "&topic=" + topic + "&isAudio=True", files=files, auth=auth)
-    return response
+    #response = requests.post("http://" + server_ip + "/topics/produce?mssg=file&loc=" + location + "&topic=" + topic + "&isAudio=True", files=files, auth=auth)
+    #return response
 
 
-def download_file_from_server_endpoint(response, local_file_path):
+def download_file_from_server_endpoint(response):
  
     # Send HTTP GET request to server and attempt to receive a response
     #response = requests.get(server_endpoint)
@@ -268,12 +328,12 @@ def download_file_from_server_endpoint(response, local_file_path):
     # If the HTTP GET request can be served
     print(response.status_code)
     if response.status_code == 200:
-        print(response.iter_content)
-        print(response.json()['Message'])
+        #print(response.iter_content)
+        file_bytes = (response.json()['Message']).encode('UTF-8')
         # Write the file contents in the response to a file specified by local_file_path
-        with open(local_file_path, 'wb') as local_file:
-            for chunk in response.iter_content(chunk_size=128):
-                local_file.write(chunk)
+        with open("receivedAudio.wav", 'wb') as local_file:
+            #for chunk in file_bytes(chunk_size=128):
+            local_file.write(file_bytes)
             
 
 while status != "q":            

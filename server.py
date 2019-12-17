@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, make_response, jsonify
+from flask import Flask, render_template, request, make_response, jsonify, send_file
 from functools import wraps
 import requests
 
@@ -131,17 +131,22 @@ def topics_produce():
     location = request.args.get('loc') # Ex. Will come in like VA-herndon
     topic = request.args.get('topic') # Ex. jiuJistu
     isAudio = request.args.get('isAudio')
+    isAnonymous = request.args.get('isAnonymous')
     
     if username != None and message != None and location != None and topic != None:
         result = db.users_collection.find_one({"_id" : username}) # Check if username is valid
         community_topic = location + ":" + topic # Ex. Queue name and stored in mongoDB as VA-herndon:jiuJistu
         result2 = db.topics_collection.find_one({"Topic" : community_topic}) # check if valid topic in your community. MAYBE: prevent user from making topic as location (Ex. VA-herndon as topic)
         
-        if isAudio != None: # if audio file sent
+        if isAudio != None and isAnonymous == None: # if audio file sent
             uuidAudio = str(uuid.uuid4())
-            db.audioFiles_collection.insert_one({"_id" : uuidAudio, "file" : request.files['file'].read()}) # uuid maps to audio file
+            db.audioFiles_collection.insert_one({"_id" : uuidAudio, "file" : request.files['file'].read(), "anonymous" : "False"}) # uuid maps to audio file
             message = uuidAudio
-        
+            
+        if isAnonymous != None and isAudio == None: # if audio file sent
+            uuidAudio = str(uuid.uuid4())
+            db.audioFiles_collection.insert_one({"_id" : uuidAudio, "file" : message, "anonymous" : "True"}) # uuid maps to audio file
+            message = uuidAudio
         
         if result == None: # TODO: remove these types of statements from all http resources b/c I use request.authorization["username"]
             response = {"Error" : "Username not valid."}
@@ -163,10 +168,8 @@ def topics_produce():
             
             # Produce a message in rabbitMQ
             full_message = username + ": " + message
-            print(full_message)
             channel.basic_publish(exchange=location, routing_key=community_topic, body=full_message)
             response = {"Topic" : topic, "Message" : full_message}
-            print(response["Message"])
             
             # Add current Topic to Users info if it is not there
             if topic not in result['Topics']:
@@ -231,20 +234,30 @@ def topics_consume():
                 response = {"Topic" : topic, "Message" : consumed_message}
 
                 # check if message is a uuid for an audio file
-                print(consumed_message)
                 maybeUuid = consumed_message.split(':', 1)[1]
-                print("|" + maybeUuid + "|")
-                maybeUuid = maybeUuid.split(' ')[1]
-                print("|" + maybeUuid + "|")
+                maybeUuid = maybeUuid.split(' ', 1)[1]
+                
                 result3 = db.audioFiles_collection.find_one({"_id" :  maybeUuid})
                 
-                if result3 != None:
+                if result3 != None and result3['anonymous'] == "False":
                     curAudioFile = result3['file'] # TODO: deep copy the contents from database 
-                    consumed_message = curAudioFile
-                    ab.audioFiles_collection.delete_one({"_id" :  maybeUuid})
+                    
+                    #with open(maybeUuid + ".wav", 'wb') as local_file:
+                        #local_file.write(curAudioFile)
+                    
+                    #return send_file(maybeUuid + ".wav", as_attachment=True, mimetype='application/json', conditional=True)
+                    
+                    consumed_message = json.dumps(curAudioFile)#curAudioFile.decode('UTF-8').strip()
+                    res4 = db.audioFiles_collection.delete_one({"_id" :  maybeUuid})
                     isAudio = True
                     response = {"Topic" : topic, "Message" : consumed_message, "isAudio" : "True"}
+                    
+                elif result3 != None and result3['anonymous'] == "True":
+                    print(consumed_message)
+                    print(result3['file'])
+                    response = {"Topic" : topic, "Message" : result3['file'], "isAnonymous" : "True"}
                 
+                #print(response)
             elif result2 == None:
                 response = {"Error" : "No such topic in your area to consume from."}    
             else:
